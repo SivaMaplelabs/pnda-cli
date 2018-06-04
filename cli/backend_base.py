@@ -18,6 +18,7 @@
 
 import uuid
 import sys
+import shutil
 import os
 import os.path
 import json
@@ -30,9 +31,12 @@ import glob
 
 from threading import Thread
 
+import re
 import yaml
 import requests
 import jinja2
+from git import Repo
+from bs4 import BeautifulSoup
 import pnda_cli_utils as utils
 from pnda_cli_utils import PNDAConfigException
 from pnda_cli_utils import MILLI_TIME
@@ -817,6 +821,7 @@ subjectAltName = @alt_names
     def _check_config(self, keyfile):
         self._check_private_key_exists(keyfile)
         self._check_pnda_mirror()
+        self._check_misaligned_versions()
         self.check_target_specific_config()
         self._check_data_volume_count()
 
@@ -854,4 +859,68 @@ subjectAltName = @alt_names
         data_volume_count = int(self._pnda_env['datanode']['DATA_VOLUME_COUNT'])
         if data_volume_count == 0:
             CONSOLE.error('Datanode volume count should not be zero')
+            sys.exit(1)
+
+    def _list_dir_files(self, url):
+        page = requests.get(url).text
+        soup = BeautifulSoup(page, 'html.parser')
+        return [url + '/' + node.get('href') for node in soup.find_all('a') if node.get('href')]
+
+    def _check_misaligned_versions(self):
+        mirror = self._pnda_env['mirrors']['PNDA_MIRROR']
+        mirror_service_names = {'kafkatool': 'kafka-tool', 'kafkamanager': 'kafka-manager', 'platform_gobblin_modules': 'gobblin-PNDA'}
+        mirror_files = self._list_dir_files(mirror)
+        mirror_sub_files = []
+        pillar_services = {}
+        version_aligned_services = []
+        version_misaligned_services = []
+        online = False
+        try:
+            platform_salt = self._pnda_env['platform_salt']['PLATFORM_SALT_LOCAL']
+            sls_path = platform_salt + "/pillar/services.sls"
+        except:
+            platform_salt = "/tmp/platform_salt"
+            if os.path.exists(platform_salt):
+                platform_salt += '_tmp'
+            Repo.clone_from(self._pnda_env['platform_salt']['PLATFORM_GIT_REPO_URI'], platform_salt,
+                            branch=self._pnda_env['platform_salt']['PLATFORM_GIT_BRANCH'])
+            sls_path = platform_salt + "/pillar/services.sls"
+            online = True
+
+        with open(sls_path, 'r') as slsfile:
+            services = yaml.load(slsfile.read())
+
+        for mfile in mirror_files:
+            if 'mirror_' in mfile:
+                mirror_sub_files.append(mfile)
+
+        for url in mirror_sub_files:
+            mirror_files += self._list_dir_files(url)
+
+        for service in services:
+            orig_service = service
+            service = service.replace('_', '-')
+            if orig_service in mirror_service_names.keys():
+                service = mirror_service_names[orig_service]
+
+            for key in services[orig_service].keys():
+                if 'version' in key:
+                    pillar_services[service] = {}
+                    pillar_services[service]['mirror'] = []
+                    pillar_services[service]['version'] = services[orig_service][key]
+                    if 'nodejs' in service or 'java' in service:
+                        match = [mfile for mfile in mirror_files if re.search(services[orig_service][key], mfile, re.I)]
+                        pillar_services[service]['mirror'] += match
+                    else:
+                        match = [mfile for mfile in mirror_files if re.search(service, mfile, re.I)]
+                        pillar_services[service]['mirror'] += match
+        for service in pillar_services:
+            match = [service for serv in pillar_services[service]['mirror'] if pillar_services[service]['version'] in serv]
+            version_aligned_services += match
+
+        version_misaligned_services = [ser for ser in pillar_services if ser not in version_aligned_services and 'hdp' not in ser]
+        if online is True:
+            shutil.rmtree(platform_salt)
+        if len(list(set(version_aligned_services))) != len(pillar_services.keys()) - 1:
+            CONSOLE.error("Found mirror components %s with misaligned versions than platform-salt", version_misaligned_services)
             sys.exit(1)

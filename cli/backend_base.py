@@ -30,9 +30,11 @@ import glob
 
 from threading import Thread
 
+import re
 import yaml
 import requests
 import jinja2
+import dns.resolver
 import pnda_cli_utils as utils
 from pnda_cli_utils import PNDAConfigException
 from pnda_cli_utils import MILLI_TIME
@@ -64,6 +66,7 @@ class BaseBackend(object):
         if flavor is not None:
             self._node_config = self.load_node_config()
         self._cached_instance_map = None
+        self._expand_ntp_server_name()
         self._set_up_env_conf()
         self._service_registry = ServiceRegistryConsul(self._ssh_client)
 
@@ -398,6 +401,28 @@ subjectAltName = @alt_names
         self._ssh_client.write_ssh_config(self._get_bastion_ip(),
                                           self._pnda_env['infrastructure']['OS_USER'],
                                           os.path.abspath(self._keyfile))
+
+    def _expand_ntp_server_name(self):
+        expanded_ntp_ip_list = []
+        ntp_servers = self._pnda_env['ntp']['NTP_SERVERS']
+        for server in ntp_servers:
+            if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", server):
+                expanded_ntp_ip_list.append(server)
+            else:
+                try:
+                    ntp_ips = dns.resolver.query(server)
+                except dns.resolver.NXDOMAIN:
+                    CONSOLE.error('No such domain %s', server)
+                    sys.exit(1)
+                except dns.resolver.Timeout:
+                    CONSOLE.error('Timed out while resolving %s', server)
+                    sys.exit(1)
+                except dns.exception.DNSException:
+                    CONSOLE.error('Unhandled exception while resolving %s', server)
+                    sys.exit(1)
+                for ntp_ip in ntp_ips:
+                    expanded_ntp_ip_list.append(str(ntp_ip))
+        self._pnda_env['ntp']['NTP_SERVERS'] = expanded_ntp_ip_list
 
     def _write_pnda_env_sh(self, cluster):
         client_only = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'PLATFORM_GIT_BRANCH']

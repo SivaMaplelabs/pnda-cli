@@ -21,6 +21,5 @@ hadoop:
 roles:
   - hadoop_manager
   - platform_testing_cdh
-  - mysql_connector
   - pnda_restart
 EOF

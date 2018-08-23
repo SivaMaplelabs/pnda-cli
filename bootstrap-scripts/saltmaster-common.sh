@@ -129,6 +129,7 @@ aws.archive_region: '$PNDA_ARCHIVE_REGION'
 aws.archive_key: '$PNDA_ARCHIVE_ACCESS_KEY_ID'
 aws.archive_secret: '$PNDA_ARCHIVE_SECRET_ACCESS_KEY'
 pnda.archive_container: '$PNDA_ARCHIVE_CONTAINER'
+pnda.archive_repo_path: '$PNDA_ARCHIVE_REPO_PATH'
 pnda.archive_type: 's3a'
 pnda.archive_service: ''
 

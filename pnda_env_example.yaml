@@ -170,6 +170,9 @@ pnda_data_archive:
   # S3 container to use for archiving PNDA datasets
   PNDA_ARCHIVE_CONTAINER: pnda-archive
 
+  # Repo path to use for archiving PNDA datasets
+  PNDA_ARCHIVE_REPO_PATH: pnda-archive-repo
+
   # AWS region that contains the PNDA_ARCHIVE_CONTAINER bucket
   PNDA_ARCHIVE_REGION: eu-west-1
 
